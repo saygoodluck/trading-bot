@@ -3,7 +3,7 @@ import axios from 'axios';
 import { MarketProvider } from '../market-provider.interface';
 import * as ccxt from 'ccxt';
 import { Order } from 'ccxt';
-import { Candle } from '../candle';
+import { Candle } from '../../../common/types';
 
 @Injectable()
 export class DemoMarketService implements MarketProvider {

@@ -1,12 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { TradingContext } from './trading-context';
-import { StrategySignal, StrategySignalType } from './strategy-signal';
+import { Context } from './trading-context';
+import { Signal, SignalAction } from './strategy-signal';
 import { IStrategy } from './strategy.interface';
 
 @Injectable()
 export class SimpleStrategy implements IStrategy {
-  evaluate({ price }: TradingContext): StrategySignal {
-    return price < 60000 ? new StrategySignal(StrategySignalType.LONG) : price > 70000 ? new StrategySignal(StrategySignalType.EXIT) : new StrategySignal(StrategySignalType.HOLD);
+  evaluate(ctx: Context): Signal {
+    const price = ctx.candles[ctx.candles.length - 1].close;
+    return price < 60000
+      ? { action: SignalAction.BUY }
+      : price > 70000
+        ? { action: SignalAction.CLOSE }
+        : { action: SignalAction.HOLD };
   }
 
   name(): string {

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { IStrategy } from './strategy.interface';
 import { EmaBollingerScalpStrategy } from './ema-bollinger-scalp.strategy';
+import { StrategyParams } from '../../common/types';
 
 
 @Injectable()

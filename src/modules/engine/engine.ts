@@ -1,7 +1,7 @@
 import { EngineInterface } from './engine.interface';
 import { IStrategy } from '../strategy/strategy.interface';
 import { Candle, MarketContext, OrderRequest } from '../../common/types';
-import { Signal } from '../strategy/strategy-signal';
+import { Signal, SignalAction } from '../strategy/strategy-signal';
 import { ATR, EMA } from '../../common/utils/indicators';
 import { IOrderExecutor } from '../execution/order-executor.interface';
 import { Context } from '../strategy/trading-context';
@@ -45,8 +45,8 @@ export class Engine implements EngineInterface {
     const price = candle.close;
 
     let order: OrderRequest;
-    if (sig.action === 'buy' || sig.action === 'sell') {
-      const side = sig.action === 'buy' ? 'BUY' : 'SELL';
+    if (sig.action === SignalAction.BUY || sig.action === SignalAction.SELL) {
+      const side = sig.action === SignalAction.BUY ? 'BUY' : 'SELL';
       const riskUsd = portfolio.equity * this.cfg.riskPct;
       const stopDistance = price * market.volATR * this.cfg.defaultAtrMult;
       const qty = Math.max(0, Math.floor((riskUsd / max(stopDistance, price * 0.001)) * 1000) / 1000);
@@ -56,7 +56,7 @@ export class Engine implements EngineInterface {
       }
     }
 
-    if (sig.action == 'close') {
+    if (sig.action === SignalAction.CLOSE) {
       const pos = await this.exec.getPosition(this.cfg.symbol);
       const qty = Math.abs(pos?.qty || 0);
       if (qty > 0)

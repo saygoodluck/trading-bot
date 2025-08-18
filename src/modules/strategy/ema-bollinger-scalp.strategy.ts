@@ -1,4 +1,4 @@
-import { Signal } from './strategy-signal';
+import { Signal, SignalAction } from './strategy-signal';
 import { ATR, EMA } from '../../common/utils/indicators';
 import { IStrategy } from './strategy.interface';
 import { Context } from './trading-context';
@@ -22,7 +22,7 @@ export class EmaBollingerScalpStrategy implements IStrategy {
 
   evaluate(ctx: Context): Signal {
     const { candles, market } = ctx;
-    if (!candles || candles.length < 60) return { action: 'hold' };
+    if (!candles || candles.length < 60) return { action: SignalAction.HOLD };
 
     // данные
     const closes = candles.map((c) => c.close);
@@ -35,7 +35,7 @@ export class EmaBollingerScalpStrategy implements IStrategy {
     // Bollinger по последним N
     const bbP = Number(this.params.bbPeriod);
     const bbM = Number(this.params.bbMult);
-    if (closes.length < bbP + 2) return { action: 'hold' };
+    if (closes.length < bbP + 2) return { action: SignalAction.HOLD };
 
     const slice = closes.slice(-bbP);
     const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
@@ -55,7 +55,7 @@ export class EmaBollingerScalpStrategy implements IStrategy {
     if (this.params.contextFilter) {
       // Не лезем против HTF
       if (this.params.longOnly) {
-        if (market.trendHTF === 'down') return { action: 'hold' };
+        if (market.trendHTF === 'down') return { action: SignalAction.HOLD };
       } else {
         // обе стороны ок; просто учитываем режим
       }
@@ -65,18 +65,18 @@ export class EmaBollingerScalpStrategy implements IStrategy {
     // Стратегия не знает про позицию, но close безопасен: Engine закроет только если позиция есть.
     // Закрываем, если цена вернулась к середине/против EMA-наклона.
     const bbMid = mean;
-    if (price > bbMid && emaFalling) return { action: 'close', reason: 'price>mid && ema falling' };
-    if (price < bbMid && emaRising) return { action: 'close', reason: 'price<mid && ema rising' };
+    if (price > bbMid && emaFalling) return { action: SignalAction.CLOSE, reason: 'price>mid && ema falling' };
+    if (price < bbMid && emaRising) return { action: SignalAction.CLOSE, reason: 'price<mid && ema rising' };
 
     // ====== ENTRY
     // LONG: цена у нижней полосы + EMA растёт + (опц.) тренд HTF вверх
     if ((this.params.longOnly ? market.trendHTF !== 'down' : true) && price <= bbLower * 1.005 && emaRising) {
-      return { action: 'buy', reason: 'BB lower touch + EMA rising', confidence: 0.9 };
+      return { action: SignalAction.BUY, reason: 'BB lower touch + EMA rising', confidence: 0.9 };
     }
 
     // SHORT: цена у верхней полосы + EMA падает + (опц.) тренд HTF вниз (если не longOnly)
     if (!this.params.longOnly && (this.params.contextFilter ? market.trendHTF !== 'up' : true) && price >= bbUpper * 0.995 && emaFalling) {
-      return { action: 'sell', reason: 'BB upper touch + EMA falling', confidence: 0.9 };
+      return { action: SignalAction.SELL, reason: 'BB upper touch + EMA falling', confidence: 0.9 };
     }
 
     // Ничего умного не произошло
@@ -94,6 +94,6 @@ export class EmaBollingerScalpStrategy implements IStrategy {
       });
     }
 
-    return { action: 'hold' };
+    return { action: SignalAction.HOLD };
   }
 }

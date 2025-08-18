@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as csv from 'csv-parser';
-import { Candle } from '../modules/market/candle';
+import { Candle } from '../common/types';
 
 export async function saveCandles(symbol: string, timeframe: string, candles: Candle[]): Promise<void> {
   const dir = path.resolve(process.cwd(), 'logs/candles');

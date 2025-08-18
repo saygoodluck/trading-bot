@@ -1,5 +1,5 @@
 import { ATR, EMA, RSI, SMA } from 'technicalindicators';
-import { Candle } from '../modules/market/candle';
+import { Candle } from '../common/types';
 
 export function getSMA(data: number[], period: number): number[] {
   return SMA.calculate({ values: data, period });

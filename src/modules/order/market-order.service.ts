@@ -3,7 +3,7 @@ import { Inject, Logger } from '@nestjs/common';
 import { MarketProvider } from '../market/market-provider.interface';
 import { MARKET_PROVIDER } from '../market/market-provider.factory';
 import { TradingContext } from '../strategy/trading-context';
-import { StrategySignal } from '../strategy/strategy-signal';
+import { Signal, SignalAction } from '../strategy/strategy-signal';
 import { PositionType } from '../../enumerations/positionType';
 import { MarketOrderDto } from './dto/market-order.dto';
 import { InjectModel } from '@nestjs/sequelize';
@@ -19,10 +19,10 @@ export class MarketOrderService {
     @InjectModel(MarketOrder) private readonly orderRepository: typeof MarketOrder
   ) {}
 
-  public async createOrder(ctx: TradingContext, signal: StrategySignal, transaction?: Transaction): Promise<MarketOrderDto> {
+  public async createOrder(ctx: TradingContext, signal: Signal, transaction?: Transaction): Promise<MarketOrderDto> {
     const { symbol, price, balanceUSD } = ctx;
     const size = ctx.position?.size || (balanceUSD * this.RISK_PERCENT) / price;
-    const side = this.mapOrderSide(signal.type, ctx.position?.type);
+    const side = this.mapOrderSide(signal.action, ctx.position?.type);
     try {
       const exec = await this.market.executeMarketOrder(symbol, side, size, 'market');
       const saved = await this.orderRepository.create(
@@ -54,13 +54,13 @@ export class MarketOrderService {
     );
   }
 
-  private mapOrderSide(signalType: StrategySignalType, positionType: PositionType): 'buy' | 'sell' {
-    if (signalType === StrategySignalType.LONG) return 'buy';
-    if (signalType === StrategySignalType.SHORT) return 'sell';
-    if (signalType === StrategySignalType.EXIT) {
+  private mapOrderSide(action: SignalAction, positionType: PositionType): 'buy' | 'sell' {
+    if (action === SignalAction.BUY) return 'buy';
+    if (action === SignalAction.SELL) return 'sell';
+    if (action === SignalAction.CLOSE) {
       return positionType === PositionType.LONG ? 'sell' : 'buy';
     }
-    throw new Error(`Unsupported signal type: ${signalType}`);
+    throw new Error(`Unsupported signal action: ${action}`);
   }
 
   private toDto(order: MarketOrder): MarketOrderDto {

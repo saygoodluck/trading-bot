@@ -56,7 +56,15 @@ export type MarketContext = {
   regime: 'trending' | 'ranging' | 'volatile' | 'calm';
 };
 
-export type Candle = { timeframe: number; open: number; high: number; low: number; close: number; volume: number };
+export type Candle = {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  timeframe?: number;
+};
 
 export type PortfolioState = { equity: number; cash: number };
 
