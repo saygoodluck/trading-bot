@@ -1,90 +1,99 @@
-import { IStrategy, StrategyContext, SignalType } from './core/strategy.interface';
-import { calculateEMA, calculateBollingerBands, getATR } from '../utils/indicators.util';
+import { Signal } from './strategy-signal';
+import { ATR, EMA } from '../../common/utils/indicators';
+import { IStrategy } from './strategy.interface';
+import { Context } from './trading-context';
+import { StrategyParams } from '../../common/types';
 
 export class EmaBollingerScalpStrategy implements IStrategy {
-  evaluate(context: StrategyContext): SignalType {
-    const candles = context.candles;
-    if (!candles || candles.length < 50) return 'hold';
+  name() {
+    return 'EmaBollingerScalpStrategy';
+  }
 
-    const closePrices = candles.map(c => c[4]);
-    const lastCandle = candles[candles.length - 1];
-    const price = lastCandle[4];
+  // Параметры под твой старый смысл, но теперь всё через params
+  params: StrategyParams = {
+    emaPeriod: 20,
+    bbPeriod: 20,
+    bbMult: 2,
+    atrPeriod: 14,
+    longOnly: true, // фильтр по направлению
+    contextFilter: true, // учитывать market.trendHTF
+    debug: false
+  };
 
-    const ema50 = calculateEMA(closePrices, 50);
-    const bb = calculateBollingerBands(closePrices, 20, 2);
-    const atr = getATR(candles, 14);
+  evaluate(ctx: Context): Signal {
+    const { candles, market } = ctx;
+    if (!candles || candles.length < 60) return { action: 'hold' };
 
-    const ema = ema50.at(-1);
-    const bbLast = bb.at(-1);
-    const atrValue = atr.at(-1);
+    // данные
+    const closes = candles.map((c) => c.close);
+    const price = closes[closes.length - 1];
 
-    const position = context.position;
-    const isBullish = lastCandle[4] > lastCandle[1];
-    const isBearish = lastCandle[4] < lastCandle[1];
+    const emaArr = EMA(closes, Number(this.params.emaPeriod));
+    const emaNow = emaArr[emaArr.length - 1];
+    const emaPrev2 = emaArr[emaArr.length - 3]; // для «наклона» EMA
 
-    const TP_MULT = 2;
-    const SL_MULT = 1;
+    // Bollinger по последним N
+    const bbP = Number(this.params.bbPeriod);
+    const bbM = Number(this.params.bbMult);
+    if (closes.length < bbP + 2) return { action: 'hold' };
 
-    if (context.debug) {
-      console.log(`[EBS] price=${price.toFixed(2)}, EMA=${ema?.toFixed(2)}, BB.middle=${bbLast?.middle.toFixed(2)}, ATR=${atrValue?.toFixed(4)}`);
-    }
+    const slice = closes.slice(-bbP);
+    const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
+    const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / slice.length;
+    const stdev = Math.sqrt(variance);
+    const bbUpper = mean + bbM * stdev;
+    const bbLower = mean - bbM * stdev;
 
-    // === Закрытие по TP/SL ===
-    if (position.type === 'long') {
-      if (position.tp && price >= position.tp) {
-        if (context.debug) console.log(`[TP] LONG: price ${price} >= tp ${position.tp}`);
-        return 'close-long';
-      }
-      if (position.sl && price <= position.sl) {
-        if (context.debug) console.log(`[SL] LONG: price ${price} <= sl ${position.sl}`);
-        return 'close-long';
-      }
-    }
+    // ATR для «здравого смысла» (волатильность/режим)
+    const atrArr = ATR(candles, Number(this.params.atrPeriod));
+    const atrNow = atrArr[atrArr.length - 1];
 
-    if (position.type === 'short') {
-      if (position.tp && price <= position.tp) {
-        if (context.debug) console.log(`[TP] SHORT: price ${price} <= tp ${position.tp}`);
-        return 'close-short';
-      }
-      if (position.sl && price >= position.sl) {
-        if (context.debug) console.log(`[SL] SHORT: price ${price} >= sl ${position.sl}`);
-        return 'close-short';
-      }
-    }
+    // фильтры
+    const emaRising = emaNow > emaPrev2;
+    const emaFalling = emaNow < emaPrev2;
 
-    // === Вход в позицию ===
-    if (position.type === 'none' && atrValue && ema && bbLast) {
-      // LONG
-      if (
-        price > ema &&
-        lastCandle[3] <= bbLast.lower &&
-        isBullish
-      ) {
-        const sl = price - SL_MULT * atrValue;
-        const tp = price + TP_MULT * atrValue;
-        context.position.sl = sl;
-        context.position.tp = tp;
-
-        if (context.debug) console.log(`[ENTRY LONG] price=${price}, sl=${sl}, tp=${tp}`);
-        return 'buy';
-      }
-
-      // SHORT
-      if (
-        price < ema &&
-        lastCandle[2] >= bbLast.upper &&
-        isBearish
-      ) {
-        const sl = price + SL_MULT * atrValue;
-        const tp = price - TP_MULT * atrValue;
-        context.position.sl = sl;
-        context.position.tp = tp;
-
-        if (context.debug) console.log(`[ENTRY SHORT] price=${price}, sl=${sl}, tp=${tp}`);
-        return 'short';
+    if (this.params.contextFilter) {
+      // Не лезем против HTF
+      if (this.params.longOnly) {
+        if (market.trendHTF === 'down') return { action: 'hold' };
+      } else {
+        // обе стороны ок; просто учитываем режим
       }
     }
 
-    return 'hold';
+    // ====== EXIT (мягкая логика, «закрыть если спринг/сжатие прошло»)
+    // Стратегия не знает про позицию, но close безопасен: Engine закроет только если позиция есть.
+    // Закрываем, если цена вернулась к середине/против EMA-наклона.
+    const bbMid = mean;
+    if (price > bbMid && emaFalling) return { action: 'close', reason: 'price>mid && ema falling' };
+    if (price < bbMid && emaRising) return { action: 'close', reason: 'price<mid && ema rising' };
+
+    // ====== ENTRY
+    // LONG: цена у нижней полосы + EMA растёт + (опц.) тренд HTF вверх
+    if ((this.params.longOnly ? market.trendHTF !== 'down' : true) && price <= bbLower * 1.005 && emaRising) {
+      return { action: 'buy', reason: 'BB lower touch + EMA rising', confidence: 0.9 };
+    }
+
+    // SHORT: цена у верхней полосы + EMA падает + (опц.) тренд HTF вниз (если не longOnly)
+    if (!this.params.longOnly && (this.params.contextFilter ? market.trendHTF !== 'up' : true) && price >= bbUpper * 0.995 && emaFalling) {
+      return { action: 'sell', reason: 'BB upper touch + EMA falling', confidence: 0.9 };
+    }
+
+    // Ничего умного не произошло
+    if (this.params.debug) {
+      // минимальный лог (можно расширить)
+      // eslint-disable-next-line no-console
+      console.log('[EBS]', {
+        price,
+        emaNow,
+        bbUpper,
+        bbLower,
+        atrNow,
+        trendHTF: market.trendHTF,
+        regime: market.regime
+      });
+    }
+
+    return { action: 'hold' };
   }
 }

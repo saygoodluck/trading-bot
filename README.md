@@ -34,6 +34,10 @@ $ npm install
 
 ## Compile and run the project
 
+
+docker compose -f docker-compose-db.local.yaml up -d
+
+
 ```bash
 # development
 $ npm run start

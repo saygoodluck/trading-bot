@@ -1,16 +1,15 @@
 import { Module } from '@nestjs/common';
-import { BacktestService } from './backtest.service';
-import { BinanceModule } from '../binance/binance.module';
-import { WalletModule } from '../wallet/wallet.module';
+import { BinanceModule } from '../market/binance/binance.module';
 import { BacktestController } from './backtest.controller';
-import { TradeLoggerModule } from '../logger/trade-logger.module';
-import { BacktestRunnerService } from './backtest.runner.service';
-import { StrategyModule } from '../strategy/core/strategy.module';
+import { StrategyModule } from '../strategy/strategy.module';
+import { TraderModule } from '../engine/trader.module';
+import { MarketModule } from '../market/market.module';
+import { BacktestRunner } from './backtest.runner';
 
 @Module({
-  imports: [BinanceModule, WalletModule, TradeLoggerModule, StrategyModule],
+  imports: [BinanceModule, StrategyModule, TraderModule, MarketModule],
   controllers: [BacktestController],
-  providers: [BacktestService, BacktestRunnerService],
-  exports: [BacktestService]
+  providers: [BacktestRunner],
+  exports: [BacktestRunner]
 })
 export class BacktestModule {}
