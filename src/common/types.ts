@@ -54,6 +54,7 @@ export type MarketContext = {
   trendLTF: 'up' | 'down' | 'range';
   volATR: number; // as fraction, e.g. 0.02 = 2%
   regime: 'trending' | 'ranging' | 'volatile' | 'calm';
+  ema?: Record<number, number>;
 };
 
 export type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number };

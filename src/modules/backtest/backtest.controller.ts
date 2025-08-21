@@ -64,7 +64,12 @@ export class BacktestController {
           basis: 'avgEntry'
         }
       },
-      regime: { trendFilter: 'EMA200' }
+      regime: {
+        trendFilter: {
+          kind: 'SMA',
+          period: 100
+        }
+      }
     });
 
     const runner: BacktestRunner = new BacktestRunner(exec, engine, dto.symbol);
@@ -72,7 +77,7 @@ export class BacktestController {
 
     // --- Эквити и барная шкала
     const equity = res.equityCurve ?? [];
-    const barTs = candles.map(c => c.timestamp); // шкала времени считаем по свечам
+    const barTs = candles.map((c) => c.timestamp); // шкала времени считаем по свечам
 
     // Окна торговли
     const tw = summarizeTradeWindows(res.trades ?? [], barTs);
@@ -111,7 +116,7 @@ export class BacktestController {
       tradedToTs: tw.tradedToTs,
       tradedFrom: tw.tradedFrom,
       tradedTo: tw.tradedTo,
-      ...tripMx,                // включает n, winrate, pf, avgWin, avgLoss, expectancy, maxConsecLosses, avgBarsHeld
+      ...tripMx, // включает n, winrate, pf, avgWin, avgLoss, expectancy, maxConsecLosses, avgBarsHeld
       sharpe: eqMx.sharpe,
       maxDD: eqMx.maxDD,
       monthly: eqMx.monthly,
@@ -122,7 +127,7 @@ export class BacktestController {
       ...res,
       summary,
       tradeSpans: tw.tradeSpans,
-      roundTrips: trips          // возвращаем уже обогащённые трипы (с pnl и bars)
+      roundTrips: trips // возвращаем уже обогащённые трипы (с pnl и bars)
     };
   }
 

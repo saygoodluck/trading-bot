@@ -30,12 +30,15 @@ export class BotController {
       defaultAtrMult: 2,
       tpRR: 1.5,
       risk: {
-        dailyLossStopPct: 2,      // стоп-день при -2%
-        dailyProfitStopPct: 2,    // и при +2%
+        dailyLossStopPct: 2, // стоп-день при -2%
+        dailyProfitStopPct: 2, // и при +2%
         maxTradesPerDay: 25
       },
       regime: {
-        trendFilter: 'EMA200'     // торгуем только в ап-тренде над EMA200
+        trendFilter: {
+          kind: 'SMA',
+          period: 100
+        }
       }
     });
 

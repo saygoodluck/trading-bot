@@ -1,10 +1,9 @@
 import { EngineInterface } from './engine.interface';
 import { IStrategy } from '../strategy/strategy.interface';
-import { Candle, MarketContext, OrderRequest } from '../../common/types';
+import { Candle, Context, MarketContext, OrderRequest } from '../../common/types';
 import { Signal } from '../strategy/strategy-signal';
 import { ATR, EMA, SMA } from '../../common/utils/indicators';
 import { IOrderExecutor } from '../execution/order-executor.interface';
-import { Context } from '../../common/types';
 
 export type Config = {
   symbol: string;
@@ -12,8 +11,8 @@ export type Config = {
   strategy: IStrategy;
 
   // sizing
-  riskPct?: number;            // риск на сделку (доля от equity), по умолчанию 1%
-  defaultAtrMult?: number;     // множитель ATR для стоп-дистанции
+  riskPct?: number; // риск на сделку (доля от equity), по умолчанию 1%
+  defaultAtrMult?: number; // множитель ATR для стоп-дистанции
   tpRR?: number;
 
   // риск/режим
@@ -24,15 +23,19 @@ export type Config = {
 
     // --- НОВОЕ: жёсткий стоп по ATR ---
     hardStop?: {
-      enabled: boolean;        // вкл/выкл
-      atrPeriod?: number;      // дефолт 14
-      atrMult?: number;        // дефолт 2.5
-      neverLoosen?: boolean;   // true: стоп можно только подтягивать
-      basis?: 'avgEntry';      // зарезервировано для расширений
-    }
+      enabled: boolean; // вкл/выкл
+      atrPeriod?: number; // дефолт 14
+      atrMult?: number; // дефолт 2.5
+      neverLoosen?: boolean; // true: стоп можно только подтягивать
+      basis?: 'avgEntry'; // зарезервировано для расширений
+    };
   };
   regime?: {
-    trendFilter?: 'SMA100' | 'EMA200' | null;  // если задан — торгуем только при ап-тренде
+    trendFilter?: null | {
+      kind: 'EMA' | 'SMA';
+      period: number;
+      bias?: 'longOnly' | 'shortOnly' | 'both'; // по умолчанию longOnly
+    };
   };
 };
 
@@ -40,6 +43,8 @@ type EquitySnapshot = {
   ts: number;
   equity: number;
 };
+
+type StrategyWithParams = IStrategy & { params?: { emaPeriod?: number } };
 
 export class Engine implements EngineInterface {
   private readonly exec: IOrderExecutor;
@@ -76,9 +81,18 @@ export class Engine implements EngineInterface {
     if (this.pauseUntilTs && nowTs < this.pauseUntilTs) return;
 
     const { dailyLossStopPct, dailyProfitStopPct, maxTradesPerDay } = this.cfg.risk ?? {};
-    if (Number.isFinite(dailyLossStopPct) && dayPnL <= -(dailyLossStopPct as number)) { this.pauseUntilNextDay(nowTs); return; }
-    if (Number.isFinite(dailyProfitStopPct) && dayPnL >=  (dailyProfitStopPct as number)) { this.pauseUntilNextDay(nowTs); return; }
-    if (Number.isFinite(maxTradesPerDay) && this.tradesToday >= (maxTradesPerDay as number)) { this.pauseUntilNextDay(nowTs); return; }
+    if (Number.isFinite(dailyLossStopPct) && dayPnL <= -(dailyLossStopPct as number)) {
+      this.pauseUntilNextDay(nowTs);
+      return;
+    }
+    if (Number.isFinite(dailyProfitStopPct) && dayPnL >= (dailyProfitStopPct as number)) {
+      this.pauseUntilNextDay(nowTs);
+      return;
+    }
+    if (Number.isFinite(maxTradesPerDay) && this.tradesToday >= (maxTradesPerDay as number)) {
+      this.pauseUntilNextDay(nowTs);
+      return;
+    }
 
     // --- НОВОЕ: сначала проверяем срабатывание защитного стопа на текущем баре
     const pos = await this.exec.getPosition(this.cfg.symbol);
@@ -116,7 +130,7 @@ export class Engine implements EngineInterface {
       const atrAbs = atrArr[atrArr.length - 1];
       const atrMult = this.cfg.defaultAtrMult ?? 2;
 
-      const stopDistanceAbs = (Number.isFinite(atrAbs) ? atrAbs * atrMult : price * 0.001);
+      const stopDistanceAbs = Number.isFinite(atrAbs) ? atrAbs * atrMult : price * 0.001;
       const minStop = price * 0.001; // страховка от слишком узких стопов
       const denom = Math.max(stopDistanceAbs, minStop);
 
@@ -134,7 +148,7 @@ export class Engine implements EngineInterface {
       if (qtyAbs > 0) {
         order = {
           symbol: this.cfg.symbol,
-          side: (p!.qty > 0 ? 'SELL' : 'BUY'),
+          side: p!.qty > 0 ? 'SELL' : 'BUY',
           quantity: qtyAbs,
           type: 'MARKET'
         };
@@ -155,20 +169,41 @@ export class Engine implements EngineInterface {
    * Формируем рыночный контекст (индикаторы и режим)
    */
   buildMarketContext(): MarketContext {
-    const closes = this.candles.map(c => c.close);
-    const ema50 = EMA(closes, 50);
-    const ema200 = EMA(closes, 200);
-    const last = this.candles[this.candles.length - 1];
+    const closes = this.candles.map((c) => c.close);
+    const last = closes[closes.length - 1];
+
+    const strat = this.cfg.strategy as StrategyWithParams;
+    const emaP = Math.max(2, Number(strat?.params?.emaPeriod) || 20); // <-- вот тут починили
+
+    const needed = new Set<number>([50, 200, emaP]);
+
+    const emaMap: Record<number, number> = {};
+    for (const p of needed) {
+      const arr = EMA(closes, p);
+      const v = arr[arr.length - 1];
+      if (Number.isFinite(v)) emaMap[p] = v;
+    }
 
     const atr = ATR(this.candles, 14);
-    const volAtr = atr[atr.length - 1] / last.close;
+    const volAtr = atr[atr.length - 1] / last;
 
-    const spread = Math.abs(ema50[ema50.length - 1] - ema200[ema200.length - 1]) / last.close;
-    const trendHTF = ema200[ema200.length - 1] <= ema50[ema50.length - 1] ? 'up' : 'down';
-    const trendLTF = ema50[ema50.length - 1] <= closes[closes.length - 1] ? 'up' : 'down';
-    const regime = volAtr > 0.05 ? 'volatile' : (spread > 0.01 ? 'trending' : 'ranging');
+    const ema50 = emaMap[50],
+      ema200 = emaMap[200];
+    const spread = Number.isFinite(ema50) && Number.isFinite(ema200) ? Math.abs(ema50 - ema200) / last : 0;
 
-    return { trendHTF, trendLTF, volATR: volAtr, regime };
+    const f = this.cfg.regime?.trendFilter;
+    let trendHTF: 'up' | 'down';
+    if (f?.kind) {
+      const base = f.kind === 'EMA' ? (emaMap[f.period] ?? EMA(closes, f.period).slice(-1)[0]) : SMA(closes, f.period).slice(-1)[0];
+      trendHTF = last >= base ? 'up' : 'down';
+    } else {
+      trendHTF = Number.isFinite(ema50) && Number.isFinite(ema200) && ema50 >= ema200 ? 'up' : 'down';
+    }
+
+    const trendLTF = Number.isFinite(ema50) && last >= ema50 ? 'up' : 'down';
+    const regime = volAtr > 0.05 ? 'volatile' : spread > 0.01 ? 'trending' : 'ranging';
+
+    return { trendHTF, trendLTF, volATR: volAtr, regime, ema: emaMap };
   }
 
   // ===================== НОВОЕ: защитный стоп =====================
@@ -203,28 +238,19 @@ export class Engine implements EngineInterface {
   // ===================== риск/режим утилиты =====================
 
   private passTrendFilter(market: MarketContext): boolean {
-    const f = this.cfg.regime?.trendFilter ?? null;
+    const f = this.cfg.regime?.trendFilter;
     if (!f) return true;
 
-    if (f === 'SMA100') {
-      const closes = this.candles.map(c => c.close);
-      const sma100 = SMA(closes, 100);
-      const lastClose = closes[closes.length - 1];
-      const lastSma = sma100[sma100.length - 1];
-      if (!Number.isFinite(lastSma)) return false;
-      return lastClose >= lastSma;
-    }
+    const closes = this.candles.map((c) => c.close);
+    const last = closes[closes.length - 1];
+    const base = f.kind === 'EMA' ? (market.ema?.[f.period] ?? EMA(closes, f.period).slice(-1)[0]) : SMA(closes, f.period).slice(-1)[0];
 
-    if (f === 'EMA200') {
-      const closes = this.candles.map(c => c.close);
-      const ema200 = EMA(closes, 200);
-      const lastClose = closes[closes.length - 1];
-      const lastEma = ema200[ema200.length - 1];
-      if (!Number.isFinite(lastEma)) return false;
-      return lastClose >= lastEma;
-    }
+    if (!Number.isFinite(base)) return false;
 
-    return true;
+    const bias = f.bias ?? 'longOnly';
+    if (bias === 'longOnly') return last >= base;
+    if (bias === 'shortOnly') return last <= base;
+    return true; // both
   }
 
   private dayPnLPct(currentEquity: number): number {

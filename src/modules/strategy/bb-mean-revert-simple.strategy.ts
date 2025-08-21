@@ -68,8 +68,8 @@ export class BbMeanRevertSimple implements IStrategy {
     let emaOkLong = true;
     let emaOkShort = true;
     if (useEma) {
-      const emaArr = EMA(closes, Math.max(2, Number(this.params.emaPeriod)));
-      const emaNow = emaArr[emaArr.length - 1];
+      const emaP = Math.max(2, Number(this.params.emaPeriod));
+      const emaNow = ctx.market?.ema?.[emaP] ?? EMA(closes, emaP).slice(-1)[0];
       emaOkLong = price >= emaNow;   // long только если цена не ниже EMA
       emaOkShort = price <= emaNow;  // short только если цена не выше EMA
     }
