@@ -67,7 +67,8 @@ export class BacktestController {
       regime: {
         trendFilter: {
           kind: 'SMA',
-          period: 100
+          period: 100,
+          bias: 'both'
         }
       }
     });
