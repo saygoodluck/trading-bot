@@ -1,5 +1,7 @@
 import { IOrderExecutor } from './order-executor.interface';
-import { OrderRequest, OrderResult, PortfolioState, Position } from '../../common/types';
+import { Candle, OrderRequest, OrderResult, PortfolioState, Position } from '../../common/types';
+
+import { StopSide } from './sim-futures.executor';
 
 type Trade = {
   ts: number;
@@ -20,7 +22,7 @@ export class SimExecutor implements IOrderExecutor {
   private orderSeq = 0;
 
   constructor(private cfg: { feesBps: number; initialEquity: number }) {
-    this.cash = cfg.initialEquity;
+    this.cash = cfg?.initialEquity || 10000;
   }
 
   getState(): PortfolioState {
@@ -82,7 +84,7 @@ export class SimExecutor implements IOrderExecutor {
           const newEntry = (pos.entry.price * pos.qty + price * o.quantity) / newQty;
           this.cash -= price * o.quantity + fee;
           pos.qty = newQty;
-          pos.entry ={
+          pos.entry = {
             price: newEntry
           };
           this.recordTrade({ ts: Date.now(), symbol: o.symbol, side: o.side, qty: o.quantity, price, fee });
@@ -191,4 +193,20 @@ export class SimExecutor implements IOrderExecutor {
       equityCurve: this.equityCurve
     };
   }
+
+  dayPnLPct(ts: number): number {
+    return 0;
+  }
+
+  isTradingPaused(ts: number): boolean {
+    return false;
+  }
+
+  pauseUntilNextDay(ts: number): void {}
+
+  clearProtectiveStop(symbol: string) {}
+
+  enforceProtectiveStop(symbol: string, candle: Candle) {}
+
+  setProtectiveStop(symbol: string, side: StopSide, price: number, neverLoosen: boolean) {}
 }

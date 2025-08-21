@@ -1,12 +1,15 @@
 import { IOrderExecutor } from './order-executor.interface';
-import { OrderRequest, OrderResult, PortfolioState, Position, Side } from '../../common/types';
+import { Candle, OrderRequest, OrderResult, PortfolioState, Position, Side } from '../../common/types';
 import axios, { AxiosResponse } from 'axios';
 import { ConfigService } from '@nestjs/config';
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { PositionType } from '../../enumerations/positionType';
 import { PositionState } from '../../enumerations/position.state';
 
+import { StopSide } from './sim-futures.executor';
+
+@Injectable()
 export class BinanceExecutor implements IOrderExecutor {
   protected readonly logger = new Logger(BinanceExecutor.name);
 
@@ -14,10 +17,10 @@ export class BinanceExecutor implements IOrderExecutor {
   private readonly secret: string;
   private readonly baseUrl: string;
 
-  constructor(config: ConfigService) {
-    this.apiKey = config.get<string>('BINANCE_API_KEY')!;
-    this.secret = config.get<string>('BINANCE_API_SECRET')!;
-    this.baseUrl = config.get<string>('BINANCE_API_URL')!;
+  constructor(private readonly config: ConfigService) {
+    this.apiKey = this.config.get<string>('BINANCE_API_KEY')!;
+    this.secret = this.config.get<string>('BINANCE_API_SECRET')!;
+    this.baseUrl = this.config.get<string>('BINANCE_API_URL')!;
   }
 
   cancel(id: string, symbol: string): Promise<void> {
@@ -71,7 +74,6 @@ export class BinanceExecutor implements IOrderExecutor {
           tp: 0,
           rr: 0
         },
-
         pnlUnreal: unrealizedProfit,
         pnlPct: entryPrice > 0 ? (unrealizedProfit / (Math.abs(amount) * entryPrice)) * 100 : 0,
         duration: undefined
@@ -175,4 +177,20 @@ export class BinanceExecutor implements IOrderExecutor {
   getState(): PortfolioState {
     return undefined;
   }
+
+  dayPnLPct(ts: number): number {
+    return 0;
+  }
+
+  isTradingPaused(ts: number): boolean {
+    return false;
+  }
+
+  pauseUntilNextDay(ts: number): void {}
+
+  clearProtectiveStop(symbol: string) {}
+
+  enforceProtectiveStop(symbol: string, candle: Candle) {}
+
+  setProtectiveStop(symbol: string, side: StopSide, price: number, neverLoosen: boolean) {}
 }

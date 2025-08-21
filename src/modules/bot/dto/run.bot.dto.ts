@@ -1,8 +1,9 @@
 import { IsNumber, IsObject, IsOptional, IsString } from 'class-validator';
+import { TF } from '../../../common/types';
 
 export class RunBotDto {
   @IsString() symbol!: string;
-  @IsString() timeframe!: string; // e.g., '5m', '15m'
+  @IsString() timeframe!: TF; // e.g., '5m', '15m'
   @IsString() from!: string; // ISO
   @IsString() to!: string; // ISO
   @IsString() strategy!: string;

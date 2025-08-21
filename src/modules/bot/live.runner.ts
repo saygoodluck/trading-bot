@@ -1,20 +1,21 @@
-import { MarketProvider } from '../market/market-provider.interface';
 import { Engine } from '../engine/engine';
 import { BinanceExecutor } from '../execution/binance.executor';
 import { BinanceStreamService } from '../stream/binance-stream.service';
+import { BinanceKlineProvider } from '../market/binance-kline.provider';
+import { TF } from '../../common/types';
 
 export class LiveRunner {
   private running = false;
   private lastClosedTs = 0;
 
   constructor(
-    private readonly market: MarketProvider,
+    private readonly market: BinanceKlineProvider,
     private readonly exec: BinanceExecutor,
     private readonly engine: Engine,
     private readonly stream: BinanceStreamService
   ) {}
 
-  async run(symbol: string, timeframe: string, preload = 50) {
+  async run(symbol: string, timeframe: TF, preload = 50) {
     if (this.running) {
       return;
     }
@@ -28,8 +29,8 @@ export class LiveRunner {
 
     // connect to kline stream
     this.stream.connectKlines(symbol, timeframe, async (bar) => {
-      if (bar.timeframe <= this.lastClosedTs) return;
-      this.lastClosedTs = bar.timeframe;
+      if (bar.timestamp <= this.lastClosedTs) return;
+      this.lastClosedTs = bar.timestamp;
 
       const order = await this.engine.execute(bar);
       if (order) {

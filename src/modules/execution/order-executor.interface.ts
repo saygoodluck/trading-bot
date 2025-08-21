@@ -1,4 +1,5 @@
-import { OrderRequest, OrderResult, PortfolioState, Position } from '../../common/types';
+import { Candle, OrderRequest, OrderResult, PortfolioState, Position } from '../../common/types';
+import { StopSide } from './sim-futures.executor';
 
 export interface IOrderExecutor {
   place(o: OrderRequest): Promise<OrderResult>;
@@ -12,4 +13,16 @@ export interface IOrderExecutor {
   markToMarket(symbol: string, price: number, ts: number): void;
 
   report(): any;
+
+  dayPnLPct(ts: number): number;
+
+  pauseUntilNextDay(ts: number): void;
+
+  isTradingPaused(ts: number): boolean;
+
+  setProtectiveStop(symbol: string, side: StopSide, price: number, neverLoosen: boolean): void;
+
+  clearProtectiveStop(symbol: string): void;
+
+  enforceProtectiveStop(symbol: string, candle: Candle): void;
 }
