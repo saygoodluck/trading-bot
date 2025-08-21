@@ -1,16 +1,8 @@
-import { Module, Provider } from '@nestjs/common';
-import { EmaBollingerScalpStrategy } from './ema-bollinger-scalp.strategy';
-
-const strategies = [EmaBollingerScalpStrategy];
-
-const strategyProvider: Provider = {
-  provide: 'STRATEGIES',
-  useFactory: (...instances) => instances,
-  inject: strategies
-};
+import { Module } from '@nestjs/common';
+import { StrategiesRegistry } from './strategies.registry';
 
 @Module({
-  providers: [...strategies, strategyProvider],
-  exports: ['STRATEGIES']
+  providers: [StrategiesRegistry],
+  exports: [StrategiesRegistry]
 })
 export class StrategyModule {}

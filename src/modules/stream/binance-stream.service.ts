@@ -31,7 +31,7 @@ export class BinanceStreamService implements IStream {
         if (!k) return;
         if (k.x !== true) return; // берем только закрытую свечу
         const bar: Candle = {
-          timeframe: k.T, // close time (ms)
+          timestamp: k.T, // close time (ms)
           open: Number(k.o),
           high: Number(k.h),
           low: Number(k.l),

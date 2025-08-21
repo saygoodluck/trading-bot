@@ -1,4 +1,4 @@
-import { Candle } from '../../common/types';
+import { Candle } from '../types';
 
 export function SMA(values: number[], period: number): number[] {
   const out: number[] = [];
