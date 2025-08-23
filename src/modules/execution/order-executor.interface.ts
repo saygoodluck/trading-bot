@@ -10,7 +10,7 @@ export interface IOrderExecutor {
 
   getPosition(symbol: string): Promise<Position | null>;
 
-  markToMarket(symbol: string, price: number, ts: number): void;
+  markToMarket(symbol: string, price: number, ts: number, ohlc?: { open: number; high: number; low: number; close: number }): void;
 
   report(): any;
 

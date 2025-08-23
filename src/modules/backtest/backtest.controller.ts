@@ -1,15 +1,15 @@
-import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common';
-import { BacktestRunner } from './backtest.runner';
+import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
 import { RunBacktestDto } from './dto/run.backtest.dto';
-import { Engine } from '../engine/engine';
+import { BinanceKlineProvider } from '../market/binance-kline.provider';
 import { StrategiesRegistry } from '../strategy/strategies.registry';
 import { Candle } from '../../common/types';
-import { BinanceKlineProvider } from '../market/binance-kline.provider';
-import { SimFuturesExecutor } from '../execution/sim-futures.executor';
-import { summarizeTradeWindows } from '../../common/utils/backtest.utils';
 import { parseFromToMs } from '../../common/utils/time';
-import { equityMetrics, splitByDate, tripsMetrics } from '../../common/utils/analytics';
-import { buildRoundTripsWithBars, attachPnLToTripsFromTrades } from '../../common/utils/analytics';
+import { BacktestRunner } from './backtest.runner';
+import { summarizeTradeWindows } from '../../common/utils/backtest.utils';
+import { attachPnLToTripsFromTrades, buildRoundTripsWithBars, equityMetrics, splitByDate, tripsMetrics } from '../../common/utils/analytics';
+import { EngineFactory } from '../engine/engine.factory';
+
+// ───────────────────────────────────────────────────────────────────────────────
 
 @Controller('/backtest')
 export class BacktestController {
@@ -36,41 +36,12 @@ export class BacktestController {
     // --- данные
     const candles: Candle[] = await this.kline.fetchRangeCached(dto.symbol, dto.timeframe as any, fromTs, toTs);
 
-    // --- стратегия/движок
+    // --- стратегия/движок (через фабрику)
     const strategy = await this.strategies.build(dto.strategy, dto.params);
-    const exec = new SimFuturesExecutor({
-      leverage: 10,
-      takerFee: 0.0004,
-      makerFee: 0.0002,
-      maintenanceMarginRate: 0.005
-    });
-
-    const engine = new Engine(exec, {
+    const { exec, engine } = EngineFactory.create({
       symbol: dto.symbol,
       timeframe: dto.timeframe,
-      strategy,
-      riskPct: 0.01,
-      defaultAtrMult: 2, // используется для сайзинга
-      tpRR: 1.5,
-      risk: {
-        dailyLossStopPct: 2,
-        dailyProfitStopPct: 2,
-        maxTradesPerDay: 25,
-        hardStop: {
-          enabled: true,
-          atrPeriod: 14,
-          atrMult: 2.5,
-          neverLoosen: true,
-          basis: 'avgEntry'
-        }
-      },
-      regime: {
-        trendFilter: {
-          kind: 'SMA',
-          period: 100,
-          bias: 'both'
-        }
-      }
+      strategy
     });
 
     const runner: BacktestRunner = new BacktestRunner(exec, engine, dto.symbol);
@@ -99,9 +70,9 @@ export class BacktestController {
 
     // Метрики
     const eqMx = equityMetrics(equity);
-    const tripMx = tripsMetrics(trips); // теперь winrate/pf/avgBarsHeld не нули
+    const tripMx = tripsMetrics(trips);
 
-    // Walk-Forward
+    // Walk-Forward (фиксированный сплит как в примерах)
     const defaultSplit = Date.parse('2025-06-30T23:59:59Z');
     const splitTs = Math.max(fromTs, Math.min(defaultSplit, toTs));
     const { ins: eqINS, oos: eqOOS } = splitByDate(equity, splitTs);
@@ -117,7 +88,7 @@ export class BacktestController {
       tradedToTs: tw.tradedToTs,
       tradedFrom: tw.tradedFrom,
       tradedTo: tw.tradedTo,
-      ...tripMx, // включает n, winrate, pf, avgWin, avgLoss, expectancy, maxConsecLosses, avgBarsHeld
+      ...tripMx,
       sharpe: eqMx.sharpe,
       maxDD: eqMx.maxDD,
       monthly: eqMx.monthly,
@@ -128,14 +99,11 @@ export class BacktestController {
       ...res,
       summary,
       tradeSpans: tw.tradeSpans,
-      roundTrips: trips // возвращаем уже обогащённые трипы (с pnl и bars)
+      roundTrips: trips
     };
   }
 
-  @Get('strategies')
-  listStrategies() {
-    return this.strategies.list();
-  }
+  // ────────────────────────────────────────────────────────────────────
 
   private defaultFromForTF(tf: string, now: number): number {
     const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
