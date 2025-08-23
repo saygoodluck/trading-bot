@@ -1,11 +1,11 @@
-import { Engine } from '../engine/engine';
 import { Candle } from '../../common/types';
 import { IOrderExecutor } from '../execution/order-executor.interface';
+import { IEngine } from '../engine/engine.interface';
 
 export class BacktestRunner {
   constructor(
     private readonly exec: IOrderExecutor,
-    private readonly engine: Engine,
+    private readonly engine: IEngine,
     private readonly symbol: string
   ) {}
 
