@@ -193,4 +193,8 @@ export class BinanceExecutor implements IOrderExecutor {
   enforceProtectiveStop(symbol: string, candle: Candle) {}
 
   setProtectiveStop(symbol: string, side: StopSide, price: number, neverLoosen: boolean) {}
+
+  getConfig() {
+    return undefined;
+  }
 }

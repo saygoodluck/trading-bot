@@ -1,11 +1,11 @@
 import { IOrderExecutor } from './order-executor.interface';
-import { Candle, OrderRequest, OrderResult, PortfolioState, Position, Side } from '../../common/types';
+import { Candle, OrderRequest, OrderResult, PortfolioState, Position } from '../../common/types';
 
 export type StopSide = 'long' | 'short';
 
 interface ProtectiveStop {
-  side: StopSide;   // направление позиции
-  price: number;    // уровень стопа
+  side: StopSide; // направление позиции
+  price: number; // уровень стопа
 }
 
 type SimFuturesConfig = {
@@ -320,9 +320,7 @@ export class SimFuturesExecutor implements IOrderExecutor {
     if (!pos || pos.qty === 0 || Math.sign(pos.qty) === Math.sign(signedQty)) {
       // open/increase same direction
       const newQty = (pos?.qty ?? 0) + signedQty;
-      const newEntry = !pos || pos.qty === 0
-        ? price
-        : (pos.entry.price * Math.abs(pos.qty) + price * Math.abs(signedQty)) / Math.abs(newQty);
+      const newEntry = !pos || pos.qty === 0 ? price : (pos.entry.price * Math.abs(pos.qty) + price * Math.abs(signedQty)) / Math.abs(newQty);
 
       this.positions[symbol] = {
         symbol,
@@ -335,7 +333,6 @@ export class SimFuturesExecutor implements IOrderExecutor {
       const notional = Math.abs(signedQty) * price;
       this.marginUsed += notional / this.cfg.leverage;
       this.cash -= fee;
-
     } else {
       // reduce / flip
       const closingQtySigned = Math.min(Math.abs(qty), Math.abs(pos.qty)) * Math.sign(pos.qty);
@@ -414,5 +411,9 @@ export class SimFuturesExecutor implements IOrderExecutor {
 
   private maxDrawdown() {
     return this.dd.max * 100;
+  }
+
+  getConfig() {
+    return undefined;
   }
 }
