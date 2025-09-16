@@ -1,7 +1,6 @@
 import { EngineInterface } from './engine.interface';
 import { IStrategy } from '../strategy/strategy.interface';
-import { Candle, Context, MarketContext, OrderRequest } from '../../common/types';
-import { Signal } from '../strategy/strategy-signal';
+import { Candle, Context, MarketContext, OrderRequest, Signal } from '../../common/types';
 import { ATR, EMA, SMA } from '../../common/utils/indicators';
 import { IOrderExecutor } from '../execution/order-executor.interface';
 
@@ -9,34 +8,6 @@ export type Config = {
   symbol: string;
   timeframe: string;
   strategy: IStrategy;
-
-  // sizing
-  riskPct?: number; // риск на сделку (доля от equity), по умолчанию 1%
-  defaultAtrMult?: number; // множитель ATR для стоп-дистанции
-  tpRR?: number;
-
-  // риск/режим
-  risk?: {
-    dailyLossStopPct?: number;
-    dailyProfitStopPct?: number;
-    maxTradesPerDay?: number;
-
-    // --- НОВОЕ: жёсткий стоп по ATR ---
-    hardStop?: {
-      enabled: boolean; // вкл/выкл
-      atrPeriod?: number; // дефолт 14
-      atrMult?: number; // дефолт 2.5
-      neverLoosen?: boolean; // true: стоп можно только подтягивать
-      basis?: 'avgEntry'; // зарезервировано для расширений
-    };
-  };
-  regime?: {
-    trendFilter?: null | {
-      kind: 'EMA' | 'SMA';
-      period: number;
-      bias?: 'longOnly' | 'shortOnly' | 'both'; // по умолчанию longOnly
-    };
-  };
 };
 
 type EquitySnapshot = {
@@ -50,14 +21,6 @@ export class Engine implements EngineInterface {
   private readonly exec: IOrderExecutor;
   private readonly candles: Candle[] = [];
   private readonly cfg: Config;
-
-  // ---- внутренняя учётка для дневного контроля/пауз
-  private pauseUntilTs: number | null = null;
-  private dayKey: string | null = null;
-  private dayStartEquity = NaN;
-  private tradesToday = 0;
-
-  private lastEquity: EquitySnapshot | null = null;
 
   constructor(exec: IOrderExecutor, cfg: Config) {
     this.exec = exec;
@@ -77,32 +40,10 @@ export class Engine implements EngineInterface {
     const portfolio = this.exec.getState();
     const dayPnL = this.dayPnLPct(portfolio.equity);
 
-    // пауза
-    if (this.pauseUntilTs && nowTs < this.pauseUntilTs) return;
-
-    const { dailyLossStopPct, dailyProfitStopPct, maxTradesPerDay } = this.cfg.risk ?? {};
-    if (Number.isFinite(dailyLossStopPct) && dayPnL <= -(dailyLossStopPct as number)) {
-      this.pauseUntilNextDay(nowTs);
-      return;
-    }
-    if (Number.isFinite(dailyProfitStopPct) && dayPnL >= (dailyProfitStopPct as number)) {
-      this.pauseUntilNextDay(nowTs);
-      return;
-    }
-    if (Number.isFinite(maxTradesPerDay) && this.tradesToday >= (maxTradesPerDay as number)) {
-      this.pauseUntilNextDay(nowTs);
-      return;
-    }
-
-    // --- НОВОЕ: сначала проверяем срабатывание защитного стопа на текущем баре
     const pos = await this.exec.getPosition(this.cfg.symbol);
-    if (pos && Math.abs(pos.qty) > 0) {
-      this.exec.enforceProtectiveStop(this.cfg.symbol, candle);
-    }
 
     // фильтр тренда
     const market = this.buildMarketContext();
-    if (!this.passTrendFilter(market)) return;
 
     // контекст стратегии
     const ctx: Context = {
@@ -115,53 +56,9 @@ export class Engine implements EngineInterface {
 
     // сигнал
     const sig: Signal = this.cfg.strategy.evaluate(ctx);
-    const price = candle.close;
 
-    // ордер + риск-сайзинг
-    let order: OrderRequest | undefined;
-
-    if (sig.action === 'buy' || sig.action === 'sell') {
-      const side = sig.action === 'buy' ? 'BUY' : 'SELL';
-
-      const riskPct = this.cfg.riskPct ?? 0.01;
-      const riskUsd = portfolio.equity * riskPct;
-
-      const atrArr = ATR(this.candles, this.cfg.risk?.hardStop?.atrPeriod ?? 14);
-      const atrAbs = atrArr[atrArr.length - 1];
-      const atrMult = this.cfg.defaultAtrMult ?? 2;
-
-      const stopDistanceAbs = Number.isFinite(atrAbs) ? atrAbs * atrMult : price * 0.001;
-      const minStop = price * 0.001; // страховка от слишком узких стопов
-      const denom = Math.max(stopDistanceAbs, minStop);
-
-      let qty = Math.floor((riskUsd / denom) * 1000) / 1000;
-      if (qty < 0) qty = 0;
-
-      if (qty > 0) {
-        order = { symbol: this.cfg.symbol, side, type: 'MARKET', quantity: qty };
-      }
-    }
-
-    if (sig.action === 'close') {
-      const p = pos; // уже брали выше
-      const qtyAbs = Math.abs(p?.qty || 0);
-      if (qtyAbs > 0) {
-        order = {
-          symbol: this.cfg.symbol,
-          side: p!.qty > 0 ? 'SELL' : 'BUY',
-          quantity: qtyAbs,
-          type: 'MARKET'
-        };
-      }
-    }
-
-    // --- НОВОЕ: обновляем (или устанавливаем) защитный стоп на основе текущей позиции и ATR
-    await this.updateProtectiveStop();
-
-    // лимит сделок
-    if (order) {
-      this.tradesToday += 1;
-      return order;
+    if (sig.order) {
+      await this.exec.place(sig.order);
     }
   }
 
