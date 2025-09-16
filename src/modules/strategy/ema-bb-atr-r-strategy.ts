@@ -15,7 +15,7 @@ export class BbMeanRevertSimple implements IStrategy {
     useEmaFilter: false,   // по умолчанию — ВЫКЛ, чтобы точно были входы
     atrPeriod: 14,
     minAtr: 0,             // 0 = не фильтровать по ATR
-    longOnly: true,        // по умолчанию только long
+    longOnly: false,
     contextFilter: false,  // HTF-режим не учитываем, чтобы сигналы точно были
     cooldownBars: 1,       // минимум — не душим частоту
     debug: false

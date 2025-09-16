@@ -1,5 +1,7 @@
 export type OrderType = 'MARKET' | 'LIMIT' | 'STOP_MARKET' | 'STOP_LIMIT' | 'TAKE_PROFIT' | 'TRAILING_STOP';
 
+export type Signal = { order?: OrderRequest; reason?: string; confidence?: number };
+
 export type OrderRequest = {
   symbol: string;
   side: 'BUY' | 'SELL';
@@ -7,6 +9,7 @@ export type OrderRequest = {
   quantity: number;
   price?: number;
   stopPrice?: number;
+  takProfit?: number;
   timeInForce?: 'GTC' | 'IOC' | 'FOK';
   reduceOnly?: boolean;
   clientOrderId?: string;
@@ -54,6 +57,7 @@ export type MarketContext = {
   trendLTF: 'up' | 'down' | 'range';
   volATR: number; // as fraction, e.g. 0.02 = 2%
   regime: 'trending' | 'ranging' | 'volatile' | 'calm';
+  ema?: Record<number, number>;
 };
 
 export type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number };
@@ -73,16 +77,16 @@ export interface Context {
 }
 
 export type TradeWindows = {
-  tradedFromTs: number | null;     // первая сделка
-  tradedToTs: number | null;       // последняя сделка
-  tradedFrom: string | null;       // ISO
-  tradedTo: string | null;         // ISO
+  tradedFromTs: number | null; // первая сделка
+  tradedToTs: number | null; // последняя сделка
+  tradedFrom: string | null; // ISO
+  tradedTo: string | null; // ISO
   tradeSpans: Array<{
     fromTs: number;
     toTs: number;
     from: string;
     to: string;
-    bars: number;                  // если передашь массив equityCurve/candles, можно заполнить
+    bars: number; // если передашь массив equityCurve/candles, можно заполнить
   }>;
 };
 
@@ -110,7 +114,7 @@ export type BacktestResponse = {
   trades: Array<{
     ts: number;
     symbol: string;
-    side: 'BUY'|'SELL';
+    side: 'BUY' | 'SELL';
     qty: number;
     price: number;
     fee?: number;
@@ -118,10 +122,12 @@ export type BacktestResponse = {
   equityCurve: Array<{ ts: number; equity: number }>;
   // Дополнительно: интервалы открытой позиции
   tradeSpans?: Array<{
-    fromTs: number; toTs: number;
-    from: string; to: string;
+    fromTs: number;
+    toTs: number;
+    from: string;
+    to: string;
     bars: number;
   }>;
 };
 
-export type TF = '1m'|'3m'|'5m'|'15m'|'30m'|'1h'|'2h'|'4h'|'6h'|'8h'|'12h'|'1d';
+export type TF = '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '2h' | '4h' | '6h' | '8h' | '12h' | '1d';

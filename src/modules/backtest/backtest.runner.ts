@@ -12,17 +12,7 @@ export class BacktestRunner {
   async run(candles: Candle[]) {
     for (const bar of candles) {
       this.exec.markToMarket(this.symbol, bar.close, bar.timestamp);
-      if (this.exec.isTradingPaused(bar.timestamp)) continue;
-
-      // пример «дневного стопа» — при -5% ставим паузу до завтра:
-      if (this.exec.dayPnLPct(bar.timestamp) <= -0.05) {
-        this.exec.pauseUntilNextDay(bar.timestamp);
-        continue;
-      }
-      const o = await this.engine.execute(bar);
-      if (o) {
-        await this.exec.place(o);
-      }
+      await this.engine.execute(bar);
     }
     return this.exec.report();
   }
