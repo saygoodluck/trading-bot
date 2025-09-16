@@ -13,6 +13,9 @@ async function bootstrap() {
   const port = configService.get('PORT');
   await app.listen(port, () => {
     logger.log(`Server running on port ${port}`);
+    logger.log(`Using market provider: ${configService.get('MARKET_PROVIDER')}`);
+    logger.log(`Using kline provider: ${configService.get('KLINE_PROVIDER')}`);
+    logger.log(`ENV: ${configService.get('ENV')}`);
   });
 }
 

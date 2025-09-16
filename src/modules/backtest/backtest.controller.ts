@@ -1,44 +1,153 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { BacktestService } from './backtest.service';
+import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common';
+import { BacktestRunner } from './backtest.runner';
+import { RunBacktestDto } from './dto/run.backtest.dto';
+import { Engine } from '../engine/engine';
+import { StrategiesRegistry } from '../strategy/strategies.registry';
+import { Candle } from '../../common/types';
+import { BinanceKlineProvider } from '../market/binance-kline.provider';
+import { SimFuturesExecutor } from '../execution/sim-futures.executor';
+import { summarizeTradeWindows } from '../../common/utils/backtest.utils';
+import { parseFromToMs } from '../../common/utils/time';
+import { equityMetrics, splitByDate, tripsMetrics } from '../../common/utils/analytics';
+import { buildRoundTripsWithBars, attachPnLToTripsFromTrades } from '../../common/utils/analytics';
 
-@Controller('backtest')
+@Controller('/backtest')
 export class BacktestController {
-  constructor(private readonly backtestService: BacktestService) {}
+  constructor(
+    private readonly strategies: StrategiesRegistry,
+    private readonly kline: BinanceKlineProvider
+  ) {}
 
-  @Get()
-  async runBacktest(
-    @Query('symbol') symbol: string = 'ETH/USDT',
-    @Query('timeframe') timeframe: string = '15m',
-    @Query('limit') limit: number = 500,
-    @Query('strategy') strategyName: string,
-    @Query('debug') debug: boolean = false,
-    @Query('initialBalance') initialBalance: number = 1000
-  ) {
-    try {
-      await this.backtestService.runBacktest(
-        symbol,
-        timeframe,
-        limit,
-        strategyName,
-        initialBalance,
-        debug
-      );
+  @Post('/run')
+  async run(@Body() dto: RunBacktestDto) {
+    const now = Date.now();
 
-      return {
-        status: 'success',
-        message: 'Backtest completed successfully'
-      };
-    } catch (error) {
-      return {
-        status: 'error',
-        message: error.message,
-        availableStrategies: this.backtestService.getAvailableStrategies()
-      };
-    }
+    // --- from/to + валидация
+    const parsedFrom = dto.from ? parseFromToMs(dto.from) : this.defaultFromForTF(dto.timeframe, now);
+    if (!Number.isFinite(parsedFrom)) throw new BadRequestException('Invalid "from" date');
+
+    const parsedTo = dto.to ? parseFromToMs(dto.to) : now;
+    if (!Number.isFinite(parsedTo)) throw new BadRequestException('Invalid "to" date');
+
+    const fromTs = parsedFrom;
+    const toTs = Math.min(parsedTo, now);
+    if (fromTs >= toTs) throw new BadRequestException('"from" must be earlier than "to"');
+
+    // --- данные
+    const candles: Candle[] = await this.kline.fetchRangeCached(dto.symbol, dto.timeframe as any, fromTs, toTs);
+
+    // --- стратегия/движок
+    const strategy = await this.strategies.build(dto.strategy, dto.params);
+    const exec = new SimFuturesExecutor({
+      leverage: 10,
+      takerFee: 0.0004,
+      makerFee: 0.0002,
+      maintenanceMarginRate: 0.005
+    });
+
+    const engine = new Engine(exec, {
+      symbol: dto.symbol,
+      timeframe: dto.timeframe,
+      strategy,
+      riskPct: 0.01,
+      defaultAtrMult: 2, // используется для сайзинга
+      tpRR: 1.5,
+      risk: {
+        dailyLossStopPct: 2,
+        dailyProfitStopPct: 2,
+        maxTradesPerDay: 25,
+        hardStop: {
+          enabled: true,
+          atrPeriod: 14,
+          atrMult: 2.5,
+          neverLoosen: true,
+          basis: 'avgEntry'
+        }
+      },
+      regime: { trendFilter: 'EMA200' }
+    });
+
+    const runner: BacktestRunner = new BacktestRunner(exec, engine, dto.symbol);
+    const res = await runner.run(candles);
+
+    // --- Эквити и барная шкала
+    const equity = res.equityCurve ?? [];
+    const barTs = candles.map(c => c.timestamp); // шкала времени считаем по свечам
+
+    // Окна торговли
+    const tw = summarizeTradeWindows(res.trades ?? [], barTs);
+
+    // Нормализация трейдов под аналитику
+    const normTrades = (res.trades ?? []).map((t: any) => ({
+      timestamp: typeof t.timestamp === 'number' ? t.timestamp : (t.ts as number),
+      side: String(t.side ?? '').toUpperCase(),
+      qty: t.qty,
+      amount: t.amount,
+      price: t.price,
+      fee: t.fee
+    }));
+
+    // --- Раунд-трипы: сначала bars, затем PnL (FIFO + комиссии)
+    let trips = buildRoundTripsWithBars(normTrades as any, barTs);
+    trips = attachPnLToTripsFromTrades(trips, normTrades as any);
+
+    // Метрики
+    const eqMx = equityMetrics(equity);
+    const tripMx = tripsMetrics(trips); // теперь winrate/pf/avgBarsHeld не нули
+
+    // Walk-Forward
+    const defaultSplit = Date.parse('2025-06-30T23:59:59Z');
+    const splitTs = Math.max(fromTs, Math.min(defaultSplit, toTs));
+    const { ins: eqINS, oos: eqOOS } = splitByDate(equity, splitTs);
+    const wf = { splitTs, ins: equityMetrics(eqINS), oos: equityMetrics(eqOOS) };
+
+    const summary = {
+      ...res.summary,
+      backtestFromTs: fromTs,
+      backtestToTs: toTs,
+      backtestFrom: new Date(fromTs).toISOString(),
+      backtestTo: new Date(toTs).toISOString(),
+      tradedFromTs: tw.tradedFromTs,
+      tradedToTs: tw.tradedToTs,
+      tradedFrom: tw.tradedFrom,
+      tradedTo: tw.tradedTo,
+      ...tripMx,                // включает n, winrate, pf, avgWin, avgLoss, expectancy, maxConsecLosses, avgBarsHeld
+      sharpe: eqMx.sharpe,
+      maxDD: eqMx.maxDD,
+      monthly: eqMx.monthly,
+      walkForward: wf
+    };
+
+    return {
+      ...res,
+      summary,
+      tradeSpans: tw.tradeSpans,
+      roundTrips: trips          // возвращаем уже обогащённые трипы (с pnl и bars)
+    };
   }
 
   @Get('strategies')
-  getStrategies() {
-    return this.backtestService.getAvailableStrategies();
+  listStrategies() {
+    return this.strategies.list();
+  }
+
+  private defaultFromForTF(tf: string, now: number): number {
+    const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+    const byTf: Record<string, number> = {
+      '1m': 90 * 24 * 60 * 60 * 1000,
+      '3m': 180 * 24 * 60 * 60 * 1000,
+      '5m': 270 * 24 * 60 * 60 * 1000,
+      '15m': YEAR_MS,
+      '30m': YEAR_MS,
+      '1h': 2 * YEAR_MS,
+      '2h': 2 * YEAR_MS,
+      '4h': 3 * YEAR_MS,
+      '6h': 3 * YEAR_MS,
+      '8h': 3 * YEAR_MS,
+      '12h': 4 * YEAR_MS,
+      '1d': 5 * YEAR_MS
+    };
+    const lookback = byTf[tf] ?? YEAR_MS;
+    return now - lookback;
   }
 }
