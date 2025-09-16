@@ -1,11 +1,11 @@
 import { IOrderExecutor } from './order-executor.interface';
-import { Candle, OrderRequest, OrderResult, PortfolioState, Position, Side } from '../../common/types';
+import { Candle, OrderRequest, OrderResult, PortfolioState, Position } from '../../common/types';
 
 export type StopSide = 'long' | 'short';
 
 interface ProtectiveStop {
-  side: StopSide;   // направление позиции
-  price: number;    // уровень стопа
+  side: StopSide; // направление позиции
+  price: number; // уровень стопа
 }
 
 type SimFuturesConfig = {
@@ -44,10 +44,6 @@ export class SimFuturesExecutor implements IOrderExecutor {
     const mark = this.lastPrice[symbol];
     if (!Number.isFinite(mark)) {
       throw new Error(`SimFutures: mark price for ${symbol} is not set before place()`);
-    }
-
-    if (this.isTradingPaused(this.clock)) {
-      return { id: this.nextId(symbol), symbol, status: 'CANCELED', executedQty: 0 };
     }
 
     if (o.reduceOnly) {
@@ -99,10 +95,6 @@ export class SimFuturesExecutor implements IOrderExecutor {
   markToMarket(symbol: string, price: number, ts: number, ohlc?: { high: number; low: number }): void {
     this.lastPrice[symbol] = price;
     this.clock = ts;
-
-    if (this.pausedUntilTs != null && ts >= this.pausedUntilTs) {
-      this.pausedUntilTs = null;
-    }
 
     // fill pending
     const pend = [...this.pending.values()];
@@ -224,32 +216,6 @@ export class SimFuturesExecutor implements IOrderExecutor {
     };
   }
 
-  // ---------- дневные лимиты / пауза ----------
-
-  private pausedUntilTs: number | null = null;
-
-  public isTradingPaused(ts: number): boolean {
-    return this.pausedUntilTs != null && ts < this.pausedUntilTs;
-  }
-
-  public pauseUntilNextDay(ts: number): void {
-    this.pausedUntilTs = this.startOfNextDayUTC(ts);
-  }
-
-  public dayPnLPct(_ts: number): number {
-    // оставлено как заглушка — дневной PnL считаем в Engine
-    return 0;
-  }
-
-  private startOfDayUTC(ts: number): number {
-    const d = new Date(ts);
-    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  }
-
-  private startOfNextDayUTC(ts: number): number {
-    return this.startOfDayUTC(ts) + 24 * 60 * 60 * 1000;
-  }
-
   // ---------- Internal ----------
 
   private cfg: SimFuturesConfig;
@@ -320,9 +286,7 @@ export class SimFuturesExecutor implements IOrderExecutor {
     if (!pos || pos.qty === 0 || Math.sign(pos.qty) === Math.sign(signedQty)) {
       // open/increase same direction
       const newQty = (pos?.qty ?? 0) + signedQty;
-      const newEntry = !pos || pos.qty === 0
-        ? price
-        : (pos.entry.price * Math.abs(pos.qty) + price * Math.abs(signedQty)) / Math.abs(newQty);
+      const newEntry = !pos || pos.qty === 0 ? price : (pos.entry.price * Math.abs(pos.qty) + price * Math.abs(signedQty)) / Math.abs(newQty);
 
       this.positions[symbol] = {
         symbol,
@@ -335,7 +299,6 @@ export class SimFuturesExecutor implements IOrderExecutor {
       const notional = Math.abs(signedQty) * price;
       this.marginUsed += notional / this.cfg.leverage;
       this.cash -= fee;
-
     } else {
       // reduce / flip
       const closingQtySigned = Math.min(Math.abs(qty), Math.abs(pos.qty)) * Math.sign(pos.qty);

@@ -23,6 +23,7 @@ export class LiveRunner {
 
     const history = await this.market.fetchOHLCV(symbol, timeframe, preload);
 
+    // TODO CRITICAL движок может создать ордер на исторических свечах
     for (const bar of history) {
       await this.engine.execute(bar);
     }
